@@ -55,13 +55,15 @@
     }
 
     input,
+    textarea,
     button {
       min-height: 42px;
       font: inherit;
       border-radius: 6px;
     }
 
-    input {
+    input,
+    textarea {
       width: 100%;
       border: 1px solid #bcccdc;
       padding: 0 12px;
@@ -69,7 +71,14 @@
       background: #ffffff;
     }
 
-    input:focus {
+    textarea {
+      min-height: 110px;
+      padding: 10px 12px;
+      resize: vertical;
+    }
+
+    input:focus,
+    textarea:focus {
       outline: 3px solid rgba(0, 0, 128, 0.22);
       border-color: #000080;
     }
@@ -213,6 +222,7 @@
 
     .task-name {
       min-width: 0;
+      white-space: pre-wrap;
     }
 
     .task-name a {
@@ -378,7 +388,7 @@
       </div>
       <div class="modal-body">
         <form id="todo-form">
-          <input id="task-input" type="text" placeholder="Task" required>
+          <textarea id="task-input" placeholder="Task" required></textarea>
           <input id="deadline-input" type="date" required>
           <button id="submit-task-button" type="submit">Add</button>
         </form>
@@ -696,20 +706,23 @@
     };
 
     const appendLinkedText = (element, text) => {
-      const linkPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
+      const linkPattern = /(https?:\/\/[^\s]+|file:\/\/[^\s]+|www\.[^\s]+)/g;
       let lastIndex = 0;
 
       text.replace(linkPattern, (match, url, offset) => {
         element.append(document.createTextNode(text.slice(lastIndex, offset)));
 
         const link = document.createElement("a");
-        const href = match.startsWith("http") ? match : `https://${match}`;
+        const trailingPunctuation = match.match(/[.,;:!?)]$/)?.[0] || "";
+        const linkText = trailingPunctuation ? match.slice(0, -1) : match;
+        const href = linkText.startsWith("http") || linkText.startsWith("file://") ? linkText : `https://${linkText}`;
 
         link.href = href;
-        link.textContent = match;
+        link.textContent = linkText;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         element.append(link);
+        element.append(document.createTextNode(trailingPunctuation));
 
         lastIndex = offset + match.length;
       });
