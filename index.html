@@ -410,6 +410,7 @@
     let remindersCache = [];
     let unsubscribeReminders = null;
     let localRemindersMigrated = false;
+    const pendingReminders = new Map();
     const defaultReminders = [
       {
         id: "default-german-vocabulary-review",
@@ -547,6 +548,8 @@
       const savedLocalReminders = getSavedLocalReminders();
 
       await Promise.all(savedLocalReminders.map((reminder) => {
+        pendingReminders.set(reminder.id, reminder);
+
         return setDoc(doc(db, "tasks", reminder.id), reminder);
       }));
     };
@@ -686,15 +689,24 @@
       unsubscribeReminders = onSnapshot(remindersCollection, async (snapshot) => {
         if (snapshot.empty) {
           await migrateLocalRemindersToFirestore();
-          remindersCache = [];
+          remindersCache = Array.from(pendingReminders.values());
           renderReminders();
           return;
         }
 
-        remindersCache = normalizeReminders(snapshot.docs.map((taskDoc) => ({
+        const firestoreReminders = normalizeReminders(snapshot.docs.map((taskDoc) => ({
           id: taskDoc.id,
           ...taskDoc.data()
         })));
+
+        firestoreReminders.forEach((reminder) => {
+          pendingReminders.delete(reminder.id);
+        });
+
+        remindersCache = [
+          ...firestoreReminders,
+          ...Array.from(pendingReminders.values())
+        ];
         renderReminders();
       }, (error) => {
         console.error("Could not load Firestore tasks:", error);
@@ -773,6 +785,7 @@
       };
 
       remindersCache.push(reminder);
+      pendingReminders.set(reminder.id, reminder);
       taskModal.hidden = true;
       renderReminders();
       form.reset();
@@ -781,9 +794,9 @@
         try {
           await setDoc(doc(db, "tasks", reminder.id), reminder);
         } catch (error) {
-          remindersCache = remindersCache.filter((cachedReminder) => cachedReminder.id !== reminder.id);
+          saveLocalReminders(remindersCache);
           renderReminders();
-          showError(`Task was not saved: ${error.message}`);
+          showError(`Task is shown here, but Firestore did not save it: ${error.message}`);
         }
       } else {
         saveLocalReminders(remindersCache);
@@ -798,6 +811,7 @@
           startReminderSubscription();
         } else {
           stopReminderSubscription();
+          pendingReminders.clear();
           remindersCache = [];
           currentView = "active";
           taskModal.hidden = true;
