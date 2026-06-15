@@ -77,6 +77,18 @@
       resize: vertical;
     }
 
+    .task-title-input {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .task-details-input {
+      min-height: 96px;
+      padding-left: 30px;
+      font-size: 12px;
+      font-weight: 400;
+    }
+
     input:focus,
     textarea:focus {
       outline: 3px solid rgba(250, 204, 21, 0.35);
@@ -411,7 +423,8 @@
       </div>
       <div class="modal-body">
         <form id="todo-form">
-          <textarea id="task-input" placeholder="Task" required></textarea>
+          <input class="task-title-input" id="task-title-input" type="text" placeholder="Task title" required>
+          <textarea class="task-details-input" id="task-details-input" placeholder="Details"></textarea>
           <input id="deadline-input" type="date" required>
           <button id="submit-task-button" type="submit">Add</button>
         </form>
@@ -438,7 +451,8 @@
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const form = document.querySelector("#todo-form");
-    const taskInput = document.querySelector("#task-input");
+    const taskTitleInput = document.querySelector("#task-title-input");
+    const taskDetailsInput = document.querySelector("#task-details-input");
     const deadlineInput = document.querySelector("#deadline-input");
     const submitTaskButton = document.querySelector("#submit-task-button");
     const modalTitle = document.querySelector("#modal-title");
@@ -596,23 +610,46 @@
       errorMessage.hidden = true;
     };
 
+    const splitTaskText = (task) => {
+      const lines = task.split("\n");
+
+      return {
+        title: lines[0] || "",
+        details: lines.slice(1).join("\n")
+      };
+    };
+
+    const getTaskTextFromInputs = () => {
+      const title = taskTitleInput.value.trim();
+      const details = taskDetailsInput.value.trim();
+
+      if (!details) {
+        return title;
+      }
+
+      return `${title}\n${details}`;
+    };
+
     const openAddModal = () => {
       editingReminderId = null;
       modalTitle.textContent = "Add Task";
       submitTaskButton.textContent = "Add";
       form.reset();
       taskModal.hidden = false;
-      taskInput.focus();
+      taskTitleInput.focus();
     };
 
     const openEditModal = (reminder) => {
+      const taskParts = splitTaskText(reminder.task);
+
       editingReminderId = reminder.id;
       modalTitle.textContent = "Edit Task";
       submitTaskButton.textContent = "Save";
-      taskInput.value = reminder.task;
+      taskTitleInput.value = taskParts.title;
+      taskDetailsInput.value = taskParts.details;
       deadlineInput.value = reminder.deadline;
       taskModal.hidden = false;
-      taskInput.focus();
+      taskTitleInput.focus();
     };
 
     const closeTaskModal = () => {
@@ -989,7 +1026,7 @@
 
       if (editingReminderId) {
         await updateReminderDetails(editingReminderId, {
-          task: taskInput.value.trim(),
+          task: getTaskTextFromInputs(),
           deadline: deadlineInput.value
         });
         closeTaskModal();
@@ -998,7 +1035,7 @@
 
       const reminder = {
         id: createReminderId(),
-        task: taskInput.value.trim(),
+        task: getTaskTextFromInputs(),
         deadline: deadlineInput.value,
         createdDate: getTodayValue(),
         completedDate: "",
