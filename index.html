@@ -301,13 +301,19 @@
       padding: 0;
       color: #334155;
       background: transparent;
-      font-size: 18px;
       line-height: 1;
     }
 
     .archive-task-button:hover {
       color: #000080;
       background: transparent;
+    }
+
+    .archive-task-button svg {
+      display: block;
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
     }
 
     .add-task-button {
@@ -531,6 +537,7 @@
         deadline: "2026-06-20",
         createdDate: "2026-06-15",
         completedDate: "",
+        archived: false,
         completed: false
       },
       {
@@ -539,6 +546,7 @@
         deadline: "2026-06-22",
         createdDate: "2026-06-15",
         completedDate: "",
+        archived: false,
         completed: false
       }
     ];
@@ -631,6 +639,7 @@
         completedDate: reminder.completed ? isDateValue(reminder.completedDate) ? reminder.completedDate : getTodayValue() : "",
         ownerEmail: reminder.ownerEmail || "",
         ownerUid: reminder.ownerUid || "",
+        archived: Boolean(reminder.archived),
         completed: Boolean(reminder.completed)
       }));
     };
@@ -769,6 +778,40 @@
       renderReminders();
     };
 
+    const archiveReminder = async (reminderId) => {
+      remindersCache = remindersCache.map((reminder) => {
+        if (reminder.id === reminderId) {
+          return {
+            ...reminder,
+            archived: true
+          };
+        }
+
+        return reminder;
+      });
+
+      const archivedReminder = remindersCache.find((reminder) => reminder.id === reminderId);
+
+      if (archivedReminder) {
+        pendingReminders.set(reminderId, archivedReminder);
+      }
+
+      renderReminders();
+
+      if (firestoreIsConfigured) {
+        try {
+          await updateDoc(doc(db, "tasks", reminderId), {
+            archived: true
+          });
+        } catch (error) {
+          saveLocalReminders(remindersCache);
+          showError(`Task was archived here, but Firestore did not save the archive: ${error.message}`);
+        }
+      } else {
+        saveLocalReminders(remindersCache);
+      }
+    };
+
     const updateReminderDetails = async (reminderId, details) => {
       remindersCache = remindersCache.map((reminder) => {
         if (reminder.id === reminderId) {
@@ -894,9 +937,19 @@
       });
       archiveButton.type = "button";
       archiveButton.className = "archive-task-button";
-      archiveButton.textContent = "▣";
+      archiveButton.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 8h14" />
+          <path d="M6 8v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" />
+          <path d="M4 8V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" />
+          <path d="M10 12h4" />
+        </svg>
+      `;
       archiveButton.setAttribute("aria-label", `Archive ${reminder.task}`);
       archiveButton.title = "Archive task";
+      archiveButton.addEventListener("click", () => {
+        archiveReminder(reminder.id);
+      });
       completedControls.className = "completed-controls";
       completedControls.append(completedCheckbox, archiveButton);
       completedCell.className = "completed-column";
@@ -917,7 +970,7 @@
       row.dataset.deadline = reminder.deadline;
       row.append(taskCell, deadlineCell, daysRemainingCell);
 
-      if (currentView === "completed") {
+      if (currentView === "archive") {
         const createdDateCell = document.createElement("td");
         const completedDateCell = document.createElement("td");
 
@@ -990,7 +1043,7 @@
 
       appContent.hidden = !canUseApp;
       viewButton.hidden = !canUseApp;
-      addTaskButton.hidden = !canUseApp || currentView === "completed";
+      addTaskButton.hidden = !canUseApp || currentView === "archive";
       errorMessage.hidden = !errorMessage.textContent;
 
       if (!canUseApp) {
@@ -1000,23 +1053,23 @@
       }
 
       const visibleReminders = remindersCache.filter((reminder) => {
-        if (currentView === "completed") {
-          return reminder.completed;
+        if (currentView === "archive") {
+          return reminder.archived;
         }
 
-        return true;
+        return !reminder.archived;
       });
 
       todoBody.innerHTML = "";
       sortReminders(visibleReminders).forEach(addReminderRow);
-      viewButton.textContent = currentView === "completed" ? "To Do List" : "Achive";
+      viewButton.textContent = currentView === "archive" ? "To Do List" : "Achive";
       completedOnlyHeaders.forEach((header) => {
-        header.hidden = currentView !== "completed";
+        header.hidden = currentView !== "archive";
       });
       document.querySelectorAll("td.completed-only").forEach((cell) => {
-        cell.hidden = currentView !== "completed";
+        cell.hidden = currentView !== "archive";
       });
-      taskModal.hidden = currentView === "completed" || taskModal.hidden;
+      taskModal.hidden = currentView === "archive" || taskModal.hidden;
     };
 
     const stopReminderSubscription = () => {
@@ -1064,7 +1117,7 @@
     };
 
     viewButton.addEventListener("click", () => {
-      currentView = currentView === "completed" ? "active" : "completed";
+      currentView = currentView === "archive" ? "active" : "archive";
       taskModal.hidden = true;
       renderReminders();
     });
@@ -1128,6 +1181,7 @@
         completedDate: "",
         ownerEmail: currentUser ? currentUser.email : "",
         ownerUid: currentUser ? currentUser.uid : "",
+        archived: false,
         completed: false
       };
 
