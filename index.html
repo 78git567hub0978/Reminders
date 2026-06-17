@@ -208,6 +208,13 @@
       width: 8%;
     }
 
+    .completed-controls {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
     th:nth-child(3),
     th:nth-child(4),
     th:nth-child(5) {
@@ -287,6 +294,20 @@
     .edit-task-button:hover {
       background: transparent;
       color: #000080;
+    }
+
+    .archive-task-button {
+      min-height: 24px;
+      padding: 0;
+      color: #334155;
+      background: transparent;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .archive-task-button:hover {
+      color: #000080;
+      background: transparent;
     }
 
     .add-task-button {
@@ -846,6 +867,8 @@
       const daysRemainingCell = document.createElement("td");
       const completedCell = document.createElement("td");
       const completedCheckbox = document.createElement("input");
+      const completedControls = document.createElement("div");
+      const archiveButton = document.createElement("button");
 
       taskName.className = "task-name";
       appendTaskText(taskName, reminder.task);
@@ -869,8 +892,15 @@
       completedCheckbox.addEventListener("change", () => {
         updateReminderCompletion(reminder.id, completedCheckbox.checked);
       });
+      archiveButton.type = "button";
+      archiveButton.className = "archive-task-button";
+      archiveButton.textContent = "▣";
+      archiveButton.setAttribute("aria-label", `Archive ${reminder.task}`);
+      archiveButton.title = "Archive task";
+      completedControls.className = "completed-controls";
+      completedControls.append(completedCheckbox, archiveButton);
       completedCell.className = "completed-column";
-      completedCell.append(completedCheckbox);
+      completedCell.append(completedControls);
 
       if (isDueToday(reminder.deadline)) {
         row.classList.add("today-row");
@@ -910,6 +940,22 @@
 
         if (!first.completed && second.completed) {
           return -1;
+        }
+
+        const firstCreatedDate = getDateFromValue(first.createdDate);
+        const secondCreatedDate = getDateFromValue(second.createdDate);
+
+        if (first.completed && second.completed) {
+          const firstCompletedDate = getDateFromValue(first.completedDate);
+          const secondCompletedDate = getDateFromValue(second.completedDate);
+
+          if (firstCompletedDate && secondCompletedDate && firstCompletedDate - secondCompletedDate !== 0) {
+            return secondCompletedDate - firstCompletedDate;
+          }
+        }
+
+        if (firstCreatedDate && secondCreatedDate && firstCreatedDate - secondCreatedDate !== 0) {
+          return secondCreatedDate - firstCreatedDate;
         }
 
         if (isDueToday(first.deadline) && !isDueToday(second.deadline)) {
