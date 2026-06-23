@@ -408,6 +408,33 @@
       stroke: currentColor;
     }
 
+    .rank-controls {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .rank-task-button {
+      width: 16px;
+      height: 12px;
+      min-height: 12px;
+      padding: 0;
+      color: #334155;
+      background: transparent;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .rank-task-button:hover {
+      color: #000080;
+      background: transparent;
+    }
+
+    .rank-task-button:disabled {
+      opacity: 0.28;
+      cursor: not-allowed;
+    }
+
     .add-task-button {
       position: fixed;
       right: 24px;
@@ -633,7 +660,8 @@
         completedDate: "",
         archived: false,
         deleted: false,
-        completed: false
+        completed: false,
+        order: 0
       },
       {
         id: "default-practice-session",
@@ -643,7 +671,8 @@
         completedDate: "",
         archived: false,
         deleted: false,
-        completed: false
+        completed: false,
+        order: 1
       }
     ];
 
@@ -739,7 +768,7 @@
     };
 
     const normalizeReminders = (reminders) => {
-      return reminders.map((reminder) => ({
+      return reminders.map((reminder, index) => ({
         id: reminder.id || createReminderId(),
         task: reminder.task || "Untitled task",
         deadline: isDateValue(reminder.deadline) ? reminder.deadline : "",
@@ -749,7 +778,8 @@
         ownerUid: reminder.ownerUid || "",
         archived: Boolean(reminder.archived),
         deleted: Boolean(reminder.deleted),
-        completed: Boolean(reminder.completed)
+        completed: Boolean(reminder.completed),
+        order: Number.isFinite(Number(reminder.order)) ? Number(reminder.order) : index
       }));
     };
 
@@ -841,6 +871,18 @@
 
     const saveLocalReminders = (reminders) => {
       localStorage.setItem(storageKey, JSON.stringify(reminders));
+    };
+
+    const getNewReminderOrder = (deadlineValue) => {
+      const sameDeadlineOrders = remindersCache
+        .filter((reminder) => reminder.deadline === deadlineValue && !reminder.archived && !reminder.deleted && !reminder.completed)
+        .map((reminder) => reminder.order);
+
+      if (!sameDeadlineOrders.length) {
+        return Date.now();
+      }
+
+      return Math.min(...sameDeadlineOrders) - 1;
     };
 
     const migrateLocalRemindersToFirestore = async () => {
@@ -986,6 +1028,93 @@
       }
     };
 
+    const getVisibleReminders = () => {
+      return remindersCache.filter((reminder) => {
+        if (currentView === "archive") {
+          return reminder.archived && !reminder.deleted;
+        }
+
+        if (currentView === "deleted") {
+          return reminder.deleted;
+        }
+
+        return !reminder.archived && !reminder.deleted;
+      });
+    };
+
+    const getRankGroup = (reminder) => {
+      return sortReminders(getVisibleReminders()).filter((groupReminder) => {
+        return groupReminder.deadline === reminder.deadline && groupReminder.completed === reminder.completed;
+      });
+    };
+
+    const getRankMoveIndex = (reminderId, direction) => {
+      const reminder = remindersCache.find((item) => item.id === reminderId);
+
+      if (!reminder) {
+        return -1;
+      }
+
+      const rankGroup = getRankGroup(reminder);
+      const currentIndex = rankGroup.findIndex((item) => item.id === reminderId);
+      const nextIndex = currentIndex + direction;
+
+      return nextIndex >= 0 && nextIndex < rankGroup.length ? nextIndex : -1;
+    };
+
+    const canMoveReminder = (reminderId, direction) => {
+      return getRankMoveIndex(reminderId, direction) !== -1;
+    };
+
+    const moveReminderRank = async (reminderId, direction) => {
+      const reminder = remindersCache.find((item) => item.id === reminderId);
+
+      if (!reminder) {
+        return;
+      }
+
+      const rankGroup = getRankGroup(reminder);
+      const currentIndex = rankGroup.findIndex((item) => item.id === reminderId);
+      const nextIndex = currentIndex + direction;
+
+      if (currentIndex === -1 || nextIndex < 0 || nextIndex >= rankGroup.length) {
+        return;
+      }
+
+      const reorderedIds = rankGroup.map((item) => item.id);
+      [reorderedIds[currentIndex], reorderedIds[nextIndex]] = [reorderedIds[nextIndex], reorderedIds[currentIndex]];
+      const updates = reorderedIds.map((id, index) => ({ id, order: index }));
+
+      remindersCache = remindersCache.map((item) => {
+        const update = updates.find((rankUpdate) => rankUpdate.id === item.id);
+
+        return update ? { ...item, order: update.order } : item;
+      });
+
+      updates.forEach((update) => {
+        const updatedReminder = remindersCache.find((item) => item.id === update.id);
+
+        if (updatedReminder) {
+          pendingReminders.set(update.id, updatedReminder);
+        }
+      });
+
+      renderReminders();
+
+      if (firestoreIsConfigured) {
+        try {
+          await Promise.all(updates.map((update) => {
+            return updateDoc(doc(db, "tasks", update.id), { order: update.order });
+          }));
+        } catch (error) {
+          saveLocalReminders(remindersCache);
+          showError(`Task order changed here, but Firestore did not save the order: ${error.message}`);
+        }
+      } else {
+        saveLocalReminders(remindersCache);
+      }
+    };
+
     const appendLinkedText = (element, text) => {
       const linkPattern = /(https?:\/\/[^\s]+|file:\/\/[^\s]+|www\.[^\s]+)/g;
       let lastIndex = 0;
@@ -1054,6 +1183,9 @@
       const completedCell = document.createElement("td");
       const completedCheckbox = document.createElement("input");
       const completedControls = document.createElement("div");
+      const rankControls = document.createElement("div");
+      const moveUpButton = document.createElement("button");
+      const moveDownButton = document.createElement("button");
       const archiveButton = document.createElement("button");
       const deleteButton = document.createElement("button");
 
@@ -1079,6 +1211,26 @@
       completedCheckbox.addEventListener("change", () => {
         updateReminderCompletion(reminder.id, completedCheckbox.checked);
       });
+      rankControls.className = "rank-controls";
+      moveUpButton.type = "button";
+      moveUpButton.className = "rank-task-button";
+      moveUpButton.textContent = "▲";
+      moveUpButton.title = "Move up within same due date";
+      moveUpButton.setAttribute("aria-label", `Move ${reminder.task} up within same due date`);
+      moveUpButton.disabled = !canMoveReminder(reminder.id, -1);
+      moveUpButton.addEventListener("click", () => {
+        moveReminderRank(reminder.id, -1);
+      });
+      moveDownButton.type = "button";
+      moveDownButton.className = "rank-task-button";
+      moveDownButton.textContent = "▼";
+      moveDownButton.title = "Move down within same due date";
+      moveDownButton.setAttribute("aria-label", `Move ${reminder.task} down within same due date`);
+      moveDownButton.disabled = !canMoveReminder(reminder.id, 1);
+      moveDownButton.addEventListener("click", () => {
+        moveReminderRank(reminder.id, 1);
+      });
+      rankControls.append(moveUpButton, moveDownButton);
       archiveButton.type = "button";
       archiveButton.className = "archive-task-button";
       archiveButton.innerHTML = `
@@ -1111,7 +1263,7 @@
         deleteReminder(reminder.id);
       });
       completedControls.className = "completed-controls";
-      completedControls.append(completedCheckbox, archiveButton, deleteButton);
+      completedControls.append(rankControls, completedCheckbox, archiveButton, deleteButton);
       completedCell.className = "completed-column";
       completedCell.append(completedControls);
 
@@ -1167,12 +1319,28 @@
           return 1;
         }
 
+        if (isOverdue(first.deadline) && isOverdue(second.deadline)) {
+          const overdueDifference = getDaysRemaining(first.deadline) - getDaysRemaining(second.deadline);
+
+          if (overdueDifference !== 0) {
+            return overdueDifference;
+          }
+        }
+
         if (isDueToday(first.deadline) && !isDueToday(second.deadline)) {
           return -1;
         }
 
         if (!isDueToday(first.deadline) && isDueToday(second.deadline)) {
           return 1;
+        }
+
+        if (first.deadline === second.deadline && first.completed === second.completed) {
+          const orderDifference = first.order - second.order;
+
+          if (orderDifference !== 0) {
+            return orderDifference;
+          }
         }
 
         const firstCreatedDate = getDateFromValue(first.createdDate);
@@ -1349,9 +1517,13 @@
       clearError();
 
       if (editingReminderId) {
+        const existingReminder = remindersCache.find((reminder) => reminder.id === editingReminderId);
+        const deadlineChanged = existingReminder && existingReminder.deadline !== deadlineInput.value;
+
         await updateReminderDetails(editingReminderId, {
           task: getTaskTextFromInputs(),
-          deadline: deadlineInput.value
+          deadline: deadlineInput.value,
+          order: deadlineChanged || !existingReminder ? getNewReminderOrder(deadlineInput.value) : existingReminder.order
         });
         closeTaskModal();
         return;
@@ -1367,7 +1539,8 @@
         ownerUid: currentUser ? currentUser.uid : "",
         archived: false,
         deleted: false,
-        completed: false
+        completed: false,
+        order: getNewReminderOrder(deadlineInput.value)
       };
 
       remindersCache.push(reminder);
