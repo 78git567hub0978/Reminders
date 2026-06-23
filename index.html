@@ -668,22 +668,22 @@
       }
 
       if (days === 0) {
-        return "Today";
+        return "Due today";
       }
 
       if (days === -1) {
-        return "1 day ago";
+        return "Due 1 day ago";
       }
 
       if (days < -1) {
-        return `${Math.abs(days)} days ago`;
+        return `Due ${Math.abs(days)} days ago`;
       }
 
       if (days === 1) {
-        return "1 day";
+        return "Due tomorrow";
       }
 
-      return `${days} days`;
+      return `Due in ${days} days`;
     };
 
     const createReminderId = () => {
