@@ -133,6 +133,14 @@
       background: #cbd5e1;
     }
 
+    .refresh-button {
+      width: 28px;
+      min-height: 28px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+    }
+
     .header-actions {
       display: flex;
       align-items: center;
@@ -195,30 +203,18 @@
 
     th:first-child,
     td:first-child {
-      width: 30%;
+      width: 64%;
     }
 
-    th:nth-child(2),
-    td:nth-child(2) {
-      width: 17%;
-    }
-
-    th:nth-child(3),
-    td:nth-child(3) {
-      width: 15%;
-    }
-
-    th:nth-child(4),
-    td:nth-child(4),
-    th:nth-child(5),
-    td:nth-child(5) {
-      width: 15%;
+    th.completed-only,
+    td.completed-only {
+      width: 16%;
     }
 
     .completed-column {
       text-align: center;
       white-space: nowrap;
-      width: 8%;
+      width: 20%;
     }
 
     .completed-controls {
@@ -321,7 +317,7 @@
     .task-cell-content {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
       gap: 12px;
     }
 
@@ -357,6 +353,7 @@
     .edit-task-button {
       min-height: 32px;
       flex: 0 0 auto;
+      margin-left: auto;
       padding: 0;
       font-size: 18px;
       background: transparent;
@@ -550,6 +547,7 @@
         <button class="auth-button sign-out-button" id="sign-out-button" type="button" hidden>Sign out</button>
         <button class="view-button" id="view-button" type="button" hidden>Achive</button>
         <button class="view-button" id="deleted-view-button" type="button" hidden>Deleted Items</button>
+        <button class="view-button refresh-button" id="refresh-completed-button" type="button" aria-label="Uncomplete all tasks" title="Uncomplete all tasks" hidden>↻</button>
       </div>
     </header>
 
@@ -560,8 +558,6 @@
         <thead>
           <tr>
             <th>Task</th>
-            <th>Deadline</th>
-            <th>Due</th>
             <th class="completed-only">Date Created</th>
             <th class="completed-only">Date Completed</th>
             <th class="completed-column">Completed</th>
@@ -626,6 +622,7 @@
     const signOutButton = document.querySelector("#sign-out-button");
     const viewButton = document.querySelector("#view-button");
     const deletedViewButton = document.querySelector("#deleted-view-button");
+    const refreshCompletedButton = document.querySelector("#refresh-completed-button");
     const addTaskButton = document.querySelector("#add-task-button");
     const taskModal = document.querySelector("#task-modal");
     const closeModalButton = document.querySelector("#close-modal-button");
@@ -929,6 +926,52 @@
       renderReminders();
     };
 
+    const uncompleteAllTasks = async () => {
+      const completedReminders = remindersCache.filter((reminder) => reminder.completed);
+
+      if (!completedReminders.length) {
+        return;
+      }
+
+      remindersCache = remindersCache.map((reminder) => {
+        if (reminder.completed) {
+          return {
+            ...reminder,
+            completed: false,
+            completedDate: ""
+          };
+        }
+
+        return reminder;
+      });
+
+      completedReminders.forEach((reminder) => {
+        const updatedReminder = remindersCache.find((item) => item.id === reminder.id);
+
+        if (updatedReminder) {
+          pendingReminders.set(reminder.id, updatedReminder);
+        }
+      });
+
+      renderReminders();
+
+      if (firestoreIsConfigured) {
+        try {
+          await Promise.all(completedReminders.map((reminder) => {
+            return updateDoc(doc(db, "tasks", reminder.id), {
+              completed: false,
+              completedDate: ""
+            });
+          }));
+        } catch (error) {
+          saveLocalReminders(remindersCache);
+          showError(`Tasks were uncompleted here, but Firestore did not save all changes: ${error.message}`);
+        }
+      } else {
+        saveLocalReminders(remindersCache);
+      }
+    };
+
     const archiveReminder = async (reminderId) => {
       remindersCache = remindersCache.map((reminder) => {
         if (reminder.id === reminderId) {
@@ -1178,8 +1221,6 @@
       const taskCellContent = document.createElement("div");
       const taskName = document.createElement("span");
       const editButton = document.createElement("button");
-      const deadlineCell = document.createElement("td");
-      const daysRemainingCell = document.createElement("td");
       const completedCell = document.createElement("td");
       const completedCheckbox = document.createElement("input");
       const completedControls = document.createElement("div");
@@ -1200,10 +1241,8 @@
         openEditModal(reminder);
       });
       taskCellContent.className = "task-cell-content";
-      taskCellContent.append(taskName, editButton);
+      taskCellContent.append(completedCheckbox, taskName, editButton);
       taskCell.append(taskCellContent);
-      deadlineCell.textContent = formatDeadline(reminder.deadline);
-      daysRemainingCell.textContent = reminder.completed ? "Completed" : formatDaysRemaining(reminder.deadline);
       completedCheckbox.type = "checkbox";
       completedCheckbox.className = "completed-checkbox";
       completedCheckbox.checked = reminder.completed;
@@ -1263,7 +1302,7 @@
         deleteReminder(reminder.id);
       });
       completedControls.className = "completed-controls";
-      completedControls.append(rankControls, completedCheckbox, archiveButton, deleteButton);
+      completedControls.append(rankControls, archiveButton, deleteButton);
       completedCell.className = "completed-column";
       completedCell.append(completedControls);
 
@@ -1284,7 +1323,7 @@
       }
 
       row.dataset.deadline = reminder.deadline;
-      row.append(taskCell, deadlineCell, daysRemainingCell);
+      row.append(taskCell);
 
       if (currentView !== "active") {
         const createdDateCell = document.createElement("td");
@@ -1384,6 +1423,7 @@
       appContent.hidden = !canUseApp;
       viewButton.hidden = !canUseApp;
       deletedViewButton.hidden = !canUseApp;
+      refreshCompletedButton.hidden = !canUseApp;
       addTaskButton.hidden = !canUseApp || currentView !== "active";
       errorMessage.hidden = !errorMessage.textContent;
 
@@ -1472,6 +1512,10 @@
       currentView = currentView === "deleted" ? "active" : "deleted";
       taskModal.hidden = true;
       renderReminders();
+    });
+
+    refreshCompletedButton.addEventListener("click", () => {
+      uncompleteAllTasks();
     });
 
     signInButton.addEventListener("click", async () => {
